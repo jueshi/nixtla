@@ -25,9 +25,24 @@ class CountryHolidays:
     """Given a list of countries, returns a dataframe with holidays for each country."""
 
     def __init__(self, countries: list[str]):
+        """
+        Initializes the CountryHolidays class.
+
+        Args:
+            countries (list[str]): List of countries to get holidays for.
+        """
         self.countries = countries
 
     def __call__(self, dates: pd.DatetimeIndex):
+        """
+        Computes the holidays for the given dates.
+
+        Args:
+            dates (pd.DatetimeIndex): The dates to check for holidays.
+
+        Returns:
+            pd.DataFrame: A dataframe with the holidays for the given dates.
+        """
         try:
             from holidays.utils import country_holidays
             from holidays.utils import list_supported_countries
@@ -41,15 +56,36 @@ class CountryHolidays:
         )
 
     def __name__(self):
+        """
+        Returns the name of the class.
+
+        Returns:
+            str: The name of the class.
+        """
         return "CountryHolidays"
 
 class SpecialDates:
     """Given a dictionary of categories and dates, returns a dataframe with the special dates."""
 
     def __init__(self, special_dates: dict[str, list[str]]):
+        """
+        Initializes the SpecialDates class.
+
+        Args:
+            special_dates (dict[str, list[str]]): Dictionary of categories and dates.
+        """
         self.special_dates = special_dates
 
     def __call__(self, dates: pd.DatetimeIndex):
+        """
+        Computes the special dates for the given dates.
+
+        Args:
+            dates (pd.DatetimeIndex): The dates to check for special dates.
+
+        Returns:
+            pd.DataFrame: A dataframe with the special dates for the given dates.
+        """
         total_special_dates = dict()
         for key, val in self.special_dates.items():
             date_vals = [ds.date() for ds in pd.to_datetime(val)]
@@ -57,4 +93,10 @@ class SpecialDates:
         return pd.DataFrame(total_special_dates, index=dates)
 
     def __name__(self):
+        """
+        Returns the name of the class.
+
+        Returns:
+            str: The name of the class.
+        """
         return "SpecialDates"
