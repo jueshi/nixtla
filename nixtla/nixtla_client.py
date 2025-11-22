@@ -99,7 +99,15 @@ logger = logging.getLogger(__name__)
 
 
 def validate_extra_params(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Validate that the dictionary doesn't contain complex structures."""
+    """
+    Validate that the dictionary doesn't contain complex structures.
+
+    Args:
+        value (dict, optional): Dictionary to validate.
+
+    Returns:
+        dict, optional: The validated dictionary.
+    """
     primitives = (str, int, float, bool, type(None))
     if value is None:
         return value
@@ -134,6 +142,21 @@ _ThresholdMethod = Literal["univariate", "multivariate"]
 
 
 class FinetunedModel(BaseModel, extra="allow"):  # type: ignore
+    """
+    A class representing a fine-tuned model.
+
+    Attributes:
+        id (str): The ID of the fine-tuned model.
+        created_at (datetime.datetime): The time when the model was created.
+        created_by (str): The user who created the model.
+        base_model_id (str): The ID of the base model.
+        steps (int): The number of steps used to fine-tune the model.
+        depth (int): The depth of the fine-tuning.
+        loss (str): The loss function used for fine-tuning.
+        model (str): The model used for fine-tuning.
+        freq (str): The frequency of the data.
+    """
+
     id: str
     created_at: datetime.datetime
     created_by: str
@@ -781,16 +804,37 @@ def _audit_negative_values(
 
 
 class ApiError(Exception):
+    """
+    Exception raised for API errors.
+
+    Attributes:
+        status_code (int, optional): The HTTP status code of the error.
+        body (Any, optional): The body of the error response.
+    """
+
     status_code: Optional[int]
     body: Any
 
     def __init__(
         self, *, status_code: Optional[int] = None, body: Optional[Any] = None
     ):
+        """
+        Initializes the ApiError exception.
+
+        Args:
+            status_code (int, optional): The HTTP status code of the error.
+            body (Any, optional): The body of the error response.
+        """
         self.status_code = status_code
         self.body = body
 
     def __str__(self) -> str:
+        """
+        Returns a string representation of the error.
+
+        Returns:
+            str: A string representation of the error.
+        """
         return f"status_code: {self.status_code}, body: {self.body}"
 
 
@@ -807,7 +851,6 @@ class NixtlaClient:
         """
         Client to interact with the Nixtla API.
 
-
         Args:
             api_key (str, optional): The authorization API key to interact
                 with the Nixtla API. If not provided, will use the
@@ -821,7 +864,7 @@ class NixtlaClient:
                 make when calling the API before giving up. It defines how
                 many times the client will retry the API call if it fails.
                 Default value is 6, indicating the client will attempt the
-                API call up to 6 times in total. Defaults to 60.
+                API call up to 6 times in total. Defaults to 6.
             retry_interval (int, optional): The interval in seconds between
                 consecutive retry attempts. This is the waiting period before
                 the client tries to call the API again after a failed attempt.
@@ -1243,8 +1286,7 @@ class NixtlaClient:
                 of your data. Defaults to 'timegpt-1'.
 
         Returns:
-            str: ID of the fine-tuned model
-
+            str: ID of the fine-tuned model.
         """
         if not isinstance(df, (pd.DataFrame, pl_DataFrame)):
             raise ValueError("Can only fine-tune on pandas or polars dataframes.")
@@ -1294,22 +1336,43 @@ class NixtlaClient:
         return resp["finetuned_model_id"]
 
     @overload
-    def finetuned_models(self, as_df: Literal[False]) -> list[FinetunedModel]: ...
-
-    @overload
-    def finetuned_models(self, as_df: Literal[True]) -> pd.DataFrame: ...
-
-    def finetuned_models(
-        self,
-        as_df: bool = False,
-    ) -> Union[list[FinetunedModel], pd.DataFrame]:
-        """List fine-tuned models
+    def finetuned_models(self, as_df: Literal[False]) -> list[FinetunedModel]:
+        """
+        List fine-tuned models.
 
         Args:
             as_df (bool): Return the fine-tuned models as a pandas dataframe.
 
         Returns:
-            List of FinetunedModel: List of available fine-tuned models.
+            List of FinetunedModel or pd.DataFrame: List of available fine-tuned models.
+        """
+        ...
+
+    @overload
+    def finetuned_models(self, as_df: Literal[True]) -> pd.DataFrame:
+        """
+        List fine-tuned models.
+
+        Args:
+            as_df (bool): Return the fine-tuned models as a pandas dataframe.
+
+        Returns:
+            pd.DataFrame: DataFrame with the available fine-tuned models.
+        """
+        ...
+
+    def finetuned_models(
+        self,
+        as_df: bool = False,
+    ) -> Union[list[FinetunedModel], pd.DataFrame]:
+        """
+        List fine-tuned models.
+
+        Args:
+            as_df (bool): Return the fine-tuned models as a pandas dataframe.
+
+        Returns:
+            List of FinetunedModel or pd.DataFrame: List of available fine-tuned models.
         """
         with self._make_client(**self._client_kwargs) as client:
             resp_body = self._get_request(client, "/v2/finetuned_models")

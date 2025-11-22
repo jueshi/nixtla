@@ -17,9 +17,15 @@
 
 </div>
 
+## 💻 Requirements
+
+- Python 3.9+
+- [Pydantic](https://docs.pydantic.dev/latest/)
+- [Pandas](https://pandas.pydata.org/) or [Polars](https://pola.rs/)
+
 ## 🚀 Quick Start
 
-https://github.com/Nixtla/nixtla/assets/4086186/163ad9e6-7a16-44e1-b2e9-dab8a0b7b6b6
+**Nixtla** is a Python library that provides a seamless interface to the [TimeGPT](https://docs.nixtla.io/docs/getting-started-timegpt_quickstart) model, enabling users to perform time series forecasting and anomaly detection with ease.
 
 ### Install nixtla's SDK
 
