@@ -136,6 +136,8 @@ class App:
         ttk.Label(pred, text="Model").grid(row=0, column=2)
         self.model_cb = ttk.Combobox(pred, textvariable=self.model_var, values=["timegpt-1", "timegpt-1-long-horizon"], width=24)
         self.model_cb.grid(row=0, column=3)
+        self.model_cb.bind("<<ComboboxSelected>>", lambda e: self.on_model_change())
+        self.on_model_change()
         ttk.Label(pred, text="Level").grid(row=0, column=4)
         self.level_entry = ttk.Entry(pred, textvariable=self.level_var, width=16)
         self.level_entry.grid(row=0, column=5)
@@ -374,6 +376,24 @@ class App:
             out = grid_group(df)
         return out
 
+    def _supports_multivariate(self, model: str) -> bool:
+        # Default TimeGPT models in this GUI do not support multivariate.
+        return False
+
+    def on_model_change(self):
+        model = self.model_var.get()
+        if not self._supports_multivariate(model):
+            try:
+                self.multivariate_var.set(False)
+                self.multivariate_cb.state(["disabled"])
+            except Exception:
+                pass
+        else:
+            try:
+                self.multivariate_cb.state(["!disabled"])
+            except Exception:
+                pass
+
     def _impute_target(self, df: pd.DataFrame, id_col: str | None, time_col: str, target_col: str, method: str) -> pd.DataFrame:
         if method == "ffill":
             if id_col and id_col in df.columns:
@@ -489,6 +509,9 @@ class App:
             mp = None
             if self.model_params_var.get().strip():
                 mp = json.loads(self.model_params_var.get().strip())
+            if self.multivariate_var.get() and not self._supports_multivariate(self.model_var.get()):
+                messagebox.showinfo("Info", "Selected model does not support multivariate; proceeding univariate.")
+                self.multivariate_var.set(False)
             res = client.forecast(
                 df=self.filtered_df,
                 h=int(self.h_var.get()),
@@ -511,7 +534,7 @@ class App:
                 num_partitions=None,
                 feature_contributions=bool(self.feature_contrib_var.get()),
                 model_parameters=mp,
-                multivariate=bool(self.multivariate_var.get()),
+                multivariate=bool(self.multivariate_var.get()) and self._supports_multivariate(self.model_var.get()),
             )
             if hasattr(res, "to_pandas"):
                 fcst_df = res.to_pandas()
@@ -575,19 +598,40 @@ class App:
                 fcst_df = fcst_df[fcst_df[time_col] <= de]
         ax.plot(act_ext[time_col], act_ext[target_col], label="Actual", color="#1f77b4")
         if "TimeGPT" in fcst_df.columns:
-            ax.plot(fcst_df[time_col], fcst_df["TimeGPT"], label="Forecast", color="#ff7f0e")
+            train_end = None
+            if self.filtered_df is not None and time_col in self.filtered_df.columns:
+                train_end = pd.to_datetime(self.filtered_df[time_col], errors="coerce").max()
+            if pd.isna(train_end):
+                train_end = pd.to_datetime(act_df[time_col], errors="coerce").max()
+            hist_mask = fcst_df[time_col] <= train_end
+            fut_mask = fcst_df[time_col] > train_end
+            if hist_mask.any():
+                ax.plot(fcst_df.loc[hist_mask, time_col], fcst_df.loc[hist_mask, "TimeGPT"], linestyle="--", color="#ff7f0e", label="Forecast (history)")
+            if fut_mask.any():
+                ax.plot(fcst_df.loc[fut_mask, time_col], fcst_df.loc[fut_mask, "TimeGPT"], linestyle="-", color="#ff7f0e", label="Forecast")
         if levels:
             lv_sorted = sorted(levels)
             for lv in lv_sorted:
                 lo = f"TimeGPT-lo-{lv}"
                 hi = f"TimeGPT-hi-{lv}"
                 if lo in fcst_df.columns and hi in fcst_df.columns:
-                    ax.fill_between(fcst_df[time_col], fcst_df[lo], fcst_df[hi], alpha=0.15, label=f"PI {lv}%")
+                    if "train_end" in locals():
+                        fut_mask = fcst_df[time_col] > train_end
+                        x = fcst_df.loc[fut_mask, time_col]
+                        ylo = fcst_df.loc[fut_mask, lo]
+                        yhi = fcst_df.loc[fut_mask, hi]
+                        ax.fill_between(x, ylo, yhi, alpha=0.15, label=f"PI {lv}%")
+                    else:
+                        ax.fill_between(fcst_df[time_col], fcst_df[lo], fcst_df[hi], alpha=0.15, label=f"PI {lv}%")
         if quantiles:
             for q in quantiles:
                 qc = f"TimeGPT-q-{int(100*q)}"
                 if qc in fcst_df.columns:
-                    ax.plot(fcst_df[time_col], fcst_df[qc], linestyle="--", alpha=0.5, label=qc)
+                    if "train_end" in locals():
+                        fut_mask = fcst_df[time_col] > train_end
+                        ax.plot(fcst_df.loc[fut_mask, time_col], fcst_df.loc[fut_mask, qc], linestyle="--", alpha=0.5, label=qc)
+                    else:
+                        ax.plot(fcst_df[time_col], fcst_df[qc], linestyle="--", alpha=0.5, label=qc)
         ax.legend(loc="best")
         ax.set_title("TimeGPT Forecast")
         ax.set_xlabel(time_col)
