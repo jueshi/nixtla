@@ -163,8 +163,9 @@ class App:
         actions = ttk.Frame(self.root)
         actions.pack(fill=tk.X, padx=8, pady=6)
         ttk.Button(actions, text="Run Forecast", command=self.run_forecast).pack(side=tk.LEFT)
-        ttk.Button(actions, text="Clear Plot", command=self.clear_plot).pack(side=tk.LEFT, padx=6)
-        ttk.Button(actions, text="Update Plot", command=self.update_plot).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Visualize Data", command=self.visualize_data).pack(side=tk.LEFT, padx=6)
+        ttk.Button(actions, text="Clear Plot", command=self.clear_plot).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Update Plot", command=self.update_plot).pack(side=tk.LEFT, padx=6)
 
         self.status_var = tk.StringVar(value="Ready")
         ttk.Label(self.root, textvariable=self.status_var).pack(fill=tk.X, padx=8, pady=4)
@@ -442,6 +443,70 @@ class App:
             return [float(x) for x in txt.split(",") if x.strip()]
         except Exception:
             return None
+
+    def visualize_data(self):
+        if self.df is None:
+            messagebox.showwarning("Warning", "Load a TSV file first")
+            return
+        id_col = self.id_col_var.get() if self.id_col_var.get() else None
+        time_col = self.time_col_var.get()
+        target_col = self.target_col_var.get()
+        if not time_col or not target_col:
+            messagebox.showwarning("Warning", "Select time and target columns")
+            return
+
+        try:
+            import matplotlib
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        except Exception as e:
+            messagebox.showerror("Error", "matplotlib is required: " + str(e))
+            return
+
+        self.clear_plot()
+        fig = Figure(figsize=(9, 5), dpi=100)
+        ax = fig.add_subplot(111)
+
+        # Prepare actual data
+        act_df = self.df.copy()
+        act_df[time_col] = pd.to_datetime(act_df[time_col], errors="coerce")
+        act_df[target_col] = pd.to_numeric(act_df[target_col], errors="coerce")
+        act_df = act_df.dropna(subset=[time_col, target_col])
+
+        if id_col in act_df.columns and self.series_id_var.get():
+            act_df = act_df[act_df[id_col] == self.series_id_var.get()]
+
+        act_df = act_df.sort_values(time_col)
+
+        # Apply Display filters
+        disp_start = self.display_start_var.get().strip()
+        disp_end = self.display_end_var.get().strip()
+
+        if disp_start:
+            ds = pd.to_datetime(disp_start, errors="coerce")
+            if pd.notna(ds):
+                act_df = act_df[act_df[time_col] >= ds]
+        if disp_end:
+            de = pd.to_datetime(disp_end, errors="coerce")
+            if pd.notna(de):
+                act_df = act_df[act_df[time_col] <= de]
+
+        if act_df.empty:
+             messagebox.showinfo("Info", "No data to display in the selected range")
+             return
+
+        ax.plot(act_df[time_col], act_df[target_col], label="Actual", color="#1f77b4")
+
+        ax.legend(loc="best")
+        ax.set_title(f"Data Visualization: {self.series_id_var.get() if self.series_id_var.get() else 'All Series'}")
+        ax.set_xlabel(time_col)
+        ax.set_ylabel(target_col)
+
+        self.figure = fig
+        self.canvas = FigureCanvasTkAgg(fig, master=self.plot_frame)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.status_var.set("Data visualization complete")
 
     def run_forecast(self):
         if self.df is None:
