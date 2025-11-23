@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd
@@ -48,11 +49,13 @@ class App:
         self._tooltips = []
         self.api_key_var = tk.StringVar(value=os.getenv("NIXTLA_API_KEY", ""))
         self.base_url_var = tk.StringVar(value=os.getenv("NIXTLA_BASE_URL", ""))
+        self.symbol_var = tk.StringVar(value="AAPL")
         self.file_path_var = tk.StringVar()
         self.id_col_var = tk.StringVar(value="unique_id")
         self.time_col_var = tk.StringVar(value="ds")
         self.target_col_var = tk.StringVar(value="y")
         self.series_id_var = tk.StringVar()
+        self.stock_period_var = tk.StringVar(value="1y")
         self.freq_var = tk.StringVar(value="")
         self.h_var = tk.IntVar(value=24)
         self.model_var = tk.StringVar(value="timegpt-1")
@@ -75,7 +78,7 @@ class App:
         self.finetune_loss_var = tk.StringVar(value="default")
         self.finetuned_model_id_var = tk.StringVar(value="")
         self.model_params_var = tk.StringVar(value="")
-        self.advanced_visible = False
+        self.advanced_visible = True
         self.figure = None
         self.canvas = None
         self.display_start_var = tk.StringVar(value="")
@@ -95,10 +98,20 @@ class App:
         self.api_key_entry = ttk.Entry(top, textvariable=self.api_key_var, width=40)
         self.api_key_entry.grid(row=0, column=1, sticky=tk.W)
         ttk.Label(top, text="Base URL").grid(row=0, column=2, sticky=tk.W)
-        self.base_url_entry = ttk.Entry(top, textvariable=self.base_url_var, width=40)
+        self.base_url_entry = ttk.Entry(top, textvariable=self.base_url_var, width=20)
         self.base_url_entry.grid(row=0, column=3, sticky=tk.W)
-        self.load_btn = ttk.Button(top, text="Load Data", command=self.load_file)
-        self.load_btn.grid(row=0, column=4, padx=6)
+
+        ttk.Label(top, text="Symbol").grid(row=0, column=5, sticky=tk.W)
+        self.symbol_entry = ttk.Entry(top, textvariable=self.symbol_var, width=6)
+        self.symbol_entry.grid(row=0, column=6, sticky=tk.W)
+        ttk.Label(top, text="Length").grid(row=0, column=7, sticky=tk.W)
+        self.stock_period_cb = ttk.Combobox(top, textvariable=self.stock_period_var, values=["1d","5d","1mo","3mo","6mo","1y","2y","5y","max"], width=8)
+        self.stock_period_cb.grid(row=0, column=8, sticky=tk.W)
+        self.load_stock_btn = ttk.Button(top, text="DownLoad(MCP)", command=self.load_stock_data)
+        self.load_stock_btn.grid(row=0, column=9, padx=6)
+
+        self.load_btn = ttk.Button(top, text="local Data", command=self.load_file)
+        self.load_btn.grid(row=0, column=10, padx=6)
 
         cols = ttk.Frame(self.root)
         cols.pack(fill=tk.X, padx=8)
@@ -233,6 +246,9 @@ class App:
         self.add_tooltip(self.api_key_entry, "API key for TimeGPT. Leave blank to use NIXTLA_API_KEY env.")
         self.add_tooltip(self.base_url_entry, "Optional custom base URL, e.g., https://api.nixtla.io")
         self.add_tooltip(self.load_btn, "Load TSV or CSV data file")
+        self.add_tooltip(self.symbol_entry, "Stock symbol to fetch via MCP")
+        self.add_tooltip(self.load_stock_btn, "Fetch daily OHLCV via MCP")
+        self.add_tooltip(self.stock_period_cb, "Length: 1d/5d/1mo/3mo/6mo/1y/2y/5y/max")
         self.add_tooltip(self.time_col_cb, "Time column name. Parsed as datetime.")
         self.add_tooltip(self.target_col_cb, "Target value column name.")
         self.add_tooltip(self.id_col_cb, "ID column for multiple series. Leave empty for single series.")
@@ -285,6 +301,48 @@ class App:
         self.file_path_var.set(path)
         self.update_columns()
         self.status_var.set(f"Loaded {os.path.basename(path)} ({len(df)} rows)")
+
+    def load_stock_data(self):
+        symbol = self.symbol_var.get().strip().upper()
+        if not symbol:
+            messagebox.showwarning("Warning", "Enter a stock symbol")
+            return
+        period = self.stock_period_var.get().strip() or "1y"
+        try:
+            sys.path.append(r"C:\Users\JueShi\Documents\Git\spoon-core-jue")
+            from spoonos_stock_agent import MCPClient
+            import asyncio
+            async def fetch():
+                client = MCPClient(server_name="stock-mcp")
+                return await client.call_tool("get_stock_historical_data", {"symbol": symbol, "period": period, "interval": "1d"})
+            res = asyncio.run(fetch())
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
+        if isinstance(res, dict) and "error" in res:
+            messagebox.showerror("Error", res.get("error", "Unknown error"))
+            return
+        try:
+            data = res.get("data", []) if isinstance(res, dict) else []
+            if not data:
+                messagebox.showerror("Error", "No data returned from MCP")
+                return
+            df = pd.DataFrame(data)
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            target_col = "adj_close" if "adj_close" in df.columns else "close"
+            df[target_col] = pd.to_numeric(df[target_col], errors="coerce")
+            df = df.dropna(subset=["date", target_col])
+            df["unique_id"] = symbol
+            self.df = df
+            self.file_path_var.set(f"MCP:{symbol} {period} 1d")
+            self.id_col_var.set("unique_id")
+            self.time_col_var.set("date")
+            self.target_col_var.set(target_col)
+            self.update_columns()
+            self.status_var.set(f"Loaded {symbol} ({len(self.df)} rows) via MCP")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
 
     def load_default_file(self):
         default_path = r"C:\Users\JueShi\Downloads\QQQ_stock_data.tsv"
