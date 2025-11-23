@@ -47,7 +47,7 @@ class App:
         self.df = None
         self.filtered_df = None
         self._tooltips = []
-        self.api_key_var = tk.StringVar(value=os.getenv("NIXTLA_API_KEY", ""))
+        self.api_key_var = tk.StringVar(value=self._load_api_key())
         self.base_url_var = tk.StringVar(value=os.getenv("NIXTLA_BASE_URL", ""))
         self.symbol_var = tk.StringVar(value="AAPL")
         self.file_path_var = tk.StringVar()
@@ -167,11 +167,12 @@ class App:
         self.display_end_entry = ttk.Entry(disp, textvariable=self.display_end_var, width=20)
         self.display_end_entry.grid(row=0, column=3)
 
-        adv_toggle = ttk.Button(self.root, text="Show Advanced", command=self.toggle_advanced)
-        adv_toggle.pack(padx=8, pady=6, anchor=tk.W)
+        self.adv_toggle = ttk.Button(self.root, text="Hide Advanced", command=self.toggle_advanced)
+        self.adv_toggle.pack(padx=8, pady=6, anchor=tk.W)
 
         self.adv = ttk.Frame(self.root)
         self._build_advanced(self.adv)
+        self.adv.pack(fill=tk.X)
 
         actions = ttk.Frame(self.root)
         actions.pack(fill=tk.X, padx=8, pady=6)
@@ -277,13 +278,67 @@ class App:
         self.add_tooltip(self.display_start_entry, "Plot start time. Leave empty to auto.")
         self.add_tooltip(self.display_end_entry, "Plot end time. Leave empty to auto.")
 
+    def _load_api_key(self) -> str:
+        key = (os.getenv("NIXTLA_API_KEY", "") or "").strip()
+        if key:
+            return key
+        candidates = []
+        try:
+            candidates.append(os.path.join(os.getcwd(), ".env"))
+        except Exception:
+            pass
+        try:
+            candidates.append(os.path.join(os.path.dirname(__file__), ".env"))
+        except Exception:
+            pass
+        try:
+            candidates.append(os.path.expanduser("~/.env"))
+        except Exception:
+            pass
+        try:
+            candidates.append(os.path.join(os.path.expanduser("~"), ".nixtla", "config.json"))
+        except Exception:
+            pass
+        try:
+            candidates.append(os.path.join(os.path.dirname(__file__), "nixtla_config.json"))
+        except Exception:
+            pass
+        for p in candidates:
+            try:
+                if os.path.isfile(p):
+                    if p.endswith(".json"):
+                        with open(p, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        v = (str(data.get("NIXTLA_API_KEY", "")) or str(data.get("api_key", ""))).strip()
+                        if v:
+                            return v
+                    else:
+                        with open(p, "r", encoding="utf-8") as f:
+                            for line in f:
+                                s = line.strip()
+                                if s.startswith("NIXTLA_API_KEY="):
+                                    v = s.split("=", 1)[1].strip().strip('"').strip("'")
+                                    if v:
+                                        return v
+            except Exception:
+                pass
+        return ""
+
     def toggle_advanced(self):
         if self.advanced_visible:
             self.adv.pack_forget()
             self.advanced_visible = False
+            try:
+                self.adv_toggle.configure(text="Show Advanced")
+            except Exception:
+                pass
         else:
             self.adv.pack(fill=tk.X)
             self.advanced_visible = True
+            try:
+                self.adv_toggle.configure(text="Hide Advanced")
+            except Exception:
+                pass
 
     def load_file(self, path=None):
         if not path:
@@ -298,9 +353,20 @@ class App:
             messagebox.showerror("Error", str(e))
             return
         self.df = df
+        time_col, target_col, id_col = self._infer_columns(df)
+        if not id_col:
+            base = os.path.splitext(os.path.basename(path))[0]
+            self.df["unique_id"] = base
+            id_col = "unique_id"
+        if time_col:
+            self.time_col_var.set(time_col)
+        if target_col:
+            self.target_col_var.set(target_col)
+        if id_col:
+            self.id_col_var.set(id_col)
         self.file_path_var.set(path)
         self.update_columns()
-        self.status_var.set(f"Loaded {os.path.basename(path)} ({len(df)} rows)")
+        self.status_var.set(f"Loaded {os.path.basename(path)} ({len(self.df)} rows)")
 
     def load_stock_data(self):
         symbol = self.symbol_var.get().strip().upper()
@@ -309,9 +375,20 @@ class App:
             return
         period = self.stock_period_var.get().strip() or "1y"
         try:
-            sys.path.append(r"C:\Users\JueShi\Documents\Git\spoon-core-jue")
-            from spoonos_stock_agent import MCPClient
+            import os
             import asyncio
+            try:
+                from spoonos_stock_agent import MCPClient
+            except ImportError:
+                candidates = [
+                    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "spoon-core-jue")),
+                    r"C:\\Users\\juesh\\jules\\spoon-core-jue",
+                    os.path.expanduser(r"~\\jules\\spoon-core-jue"),
+                ]
+                for p in candidates:
+                    if os.path.isdir(p) and p not in sys.path:
+                        sys.path.append(p)
+                from spoonos_stock_agent import MCPClient
             async def fetch():
                 client = MCPClient(server_name="stock-mcp")
                 return await client.call_tool("get_stock_historical_data", {"symbol": symbol, "period": period, "interval": "1d"})
@@ -345,7 +422,7 @@ class App:
             return
 
     def load_default_file(self):
-        default_path = r"C:\Users\JueShi\Downloads\QQQ_stock_data.tsv"
+        default_path = r".\QQQ_stock_data.tsv"
         if os.path.exists(default_path):
             try:
                 self.load_file(default_path)
@@ -410,6 +487,51 @@ class App:
         except Exception:
             return None
 
+    def _infer_columns(self, df: pd.DataFrame):
+        cols = list(df.columns)
+        time_candidates = ["date", "ds", "time", "timestamp", "datetime"]
+        target_candidates = ["adj_close", "close", "y", "value", "price"]
+        id_candidates = ["unique_id", "id", "symbol", "ticker", "series"]
+        time_col = None
+        for c in time_candidates:
+            if c in cols:
+                time_col = c
+                break
+        if not time_col:
+            for c in cols:
+                try:
+                    s = pd.to_datetime(df[c], errors="coerce")
+                    if s.notna().mean() > 0.6:
+                        time_col = c
+                        break
+                except Exception:
+                    pass
+        id_col = None
+        for c in id_candidates:
+            if c in cols:
+                id_col = c
+                break
+        target_col = None
+        for c in target_candidates:
+            if c in cols:
+                target_col = c
+                break
+        if not target_col:
+            numeric_cols = []
+            for c in cols:
+                if c == time_col or c == id_col:
+                    continue
+                try:
+                    s = pd.to_numeric(df[c], errors="coerce")
+                    if s.notna().mean() > 0.6:
+                        numeric_cols.append((c, s.notna().mean()))
+                except Exception:
+                    pass
+            if numeric_cols:
+                numeric_cols.sort(key=lambda x: -x[1])
+                target_col = numeric_cols[0][0]
+        return time_col, target_col, id_col
+
     def _auto_fix_timestamps(self, df: pd.DataFrame, id_col: str | None, time_col: str, target_col: str, freq: str | None) -> pd.DataFrame:
         if id_col and id_col in df.columns:
             df = df.drop_duplicates(subset=[id_col, time_col], keep='last')
@@ -427,8 +549,8 @@ class App:
             return g2
         if id_col and id_col in df.columns:
             out = (
-                df.groupby(id_col, observed=True, sort=False)
-                .apply(grid_group, include_groups=False)
+                df.groupby(id_col, observed=True, sort=False, group_keys=False)
+                .apply(grid_group)
                 .reset_index(drop=True)
             )
         else:
@@ -618,7 +740,7 @@ class App:
         if levels and quantiles:
             messagebox.showerror("Error", "Use level or quantiles, not both")
             return
-        api_key = self.api_key_var.get().strip() or os.getenv("NIXTLA_API_KEY", "")
+        api_key = self.api_key_var.get().strip() or os.getenv("NIXTLA_API_KEY", "") or self._load_api_key()
         if not api_key:
             messagebox.showerror("Error", "API key is required")
             return
